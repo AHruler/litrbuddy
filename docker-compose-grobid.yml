@@ -1,0 +1,25 @@
+version: '3.8' #docker-compose version
+services:  #Services - different containers
+  grobid: #Second Container, containing the api
+    image: lfoppiano/grobid:0.7.3 #using grobid image
+    init: true #initializing the container
+    ports: #binding the host port with the machine
+      -  '127.0.0.1:8070:8070'
+    ulimits: #setting the ulimits
+      core: 0
+    networks:
+      - deploy_network
+    container_name: grobid
+  app: #First Container, containing the main app 
+    image: streamtest:latest #using the image streamlittest
+    working_dir: /app #working directory
+    ports:   #binding the host port with the machine
+      -  8080:8080
+    depends_on:
+      - grobid
+
+
+networks:
+  deploy_network:
+    driver: bridge
+
