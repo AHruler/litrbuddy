@@ -6,6 +6,7 @@ import time
 import glob
 from review.utils.client import ApiClient
 import ntpath
+import requests
 from typing import List
 
 '''
@@ -44,9 +45,18 @@ REF_GROBID_CONFIG = {
     "max_workers": 2,
     }
 
-class GrobidClient(ApiClient):
+class ServerUnavailableException(Exception):
+    pass
 
-    def __init__(self, config=None, test=False):
+class GrobidClient(ApiClient):
+    """Client for GROBID services.
+    
+    Run a Grobid server (from https://grobid.readthedocs.io/en/latest/Grobid-docker/):
+     > docker pull lfoppiano/grobid:0.7.2
+     > docker run -t --rm -p 8070:8070 lfoppiano/grobid:0.7.2
+    """
+
+    def __init__(self, config=None, test=False, check_server=True):
         if config is None:
             self.config = DEFAULT_GROBID_CONFIG
         elif isinstance(config, dict):
@@ -67,7 +77,25 @@ class GrobidClient(ApiClient):
         self.sleep_time = self.config["sleep_time"]
 
         self.test = test
+        if check_server:
+            self._test_server_connection()
 
+    def _test_server_connection(self):
+        """Test if the server is up and running."""
+        the_url = self.get_server_url("isalive")
+        try:
+            r = requests.get(the_url)
+        except:
+            print("GROBID server does not appear up and running, the connection to the server failed")
+            raise ServerUnavailableException
+
+        status = r.status_code
+
+        if status != 200:
+            print("GROBID server does not appear up and running " + str(status))
+            # print 
+        else:
+            print("GROBID server is up and running")
     def process(self, input: str, output: str, service: str):
         batch_size_pdf = self.config['batch_size']
         pdf_files = []
@@ -122,6 +150,47 @@ class GrobidClient(ApiClient):
 
         if self.include_raw_citations:
             the_data['includeRawCitations'] = '1'
+
+
+        res, status = self.post(
+            url=the_url,
+            files=files,
+            data=the_data,
+            headers={'Accept': 'text/plain'}
+        )
+
+        if status == 503:
+            time.sleep(self.sleep_time)
+            return self.process_pdf_stream(pdf_file, pdf_strm, service)
+        elif status != 200:
+            with open(os.path.join(output, "failed.log"), "a+") as failed:
+                failed.write(pdf_file.strip(".pdf") + "\n")
+            print('Processing failed with error ' + str(status))
+            return ""
+        else:
+            return res.text
+    def process_pdf_stream_meta(self, pdf_file: str, pdf_strm: bytes, output: str, service: str="processHeaderDocument") -> str:
+        # process the stream
+        files = {
+            'input': (
+                pdf_file,
+                pdf_strm,
+                'application/pdf',
+                {'Expires': '0'}
+            )
+        }
+
+        the_url = 'http://' + self.grobid_server
+        the_url += ":" + self.grobid_port
+        the_url += "/api/" + service
+
+        # set the GROBID parameters
+        the_data = {}
+        
+        the_data['consolidateHeader'] = '2'
+
+    
+        the_data['includeRawAffiliations'] = '1'
 
 
         res, status = self.post(
@@ -243,26 +312,8 @@ class GrobidClient(ApiClient):
         else:
             return res.text
 
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Client for GROBID services")
-    parser.add_argument("service", help="one of [processFulltextDocument, processHeaderDocument, processReferences]")
-    parser.add_argument("--input", default=None, help="path to the directory containing PDF to process")
-    parser.add_argument("--output", default=None, help="path to the directory where to put the results")
-    parser.add_argument("--config", default=None, help="path to the config file, default is ./config.json")
-
-    args = parser.parse_args()
-
-    input_path = args.input
-    config = json.load(open(args.config)) if args.config else DEFAULT_GROBID_CONFIG
-    output_path = args.output
-    service = args.service
-
-    client = GrobidClient(config=config)
-
-    start_time = time.time()
-
-    client.process(input_path, output_path, service)
-
-    runtime = round(time.time() - start_time, 3)
-    print("runtime: %s seconds " % (runtime))
+    def get_server_url(self, service: str) -> str:
+        the_url = 'http://' + self.grobid_server
+        the_url += ":" + self.grobid_port
+        the_url += "/api/" + service
+        return the_url

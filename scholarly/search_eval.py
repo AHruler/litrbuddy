@@ -7,17 +7,18 @@ import json
 import streamlit as st
 import pandas as pd
 from streamlit.logger import get_logger
-from hold import *
+from ResearchCorpus import *
 from st_cytoscape import cytoscape
 logger = get_logger(__name__)
 
 st.set_page_config(page_title="Search Scholarly: Find helpful sources", page_icon="💝", layout="centered", initial_sidebar_state="auto")
 st.sidebar.header("💝 Search Scholarly: Find helpful sources")
 
-
+st.session_state['OPENAI_API_BASE'] ="https://api.endpoints.anyscale.com/v1"
 
 S2_API_KEY = st.secrets["S2_API_KEY"]
-st.cache_resource(ttl=60*20)
+
+@st.cache_resource(ttl=60*20)
 def get_graph(df):
     MyCorpus = ResearchCorpus(df['title_abstract'].tolist(), df['seed'].tolist(), df.to_dict('records'))
     df = MyCorpus._make_df_cluster_topics()
@@ -67,6 +68,10 @@ if "seed_papers" not in st.session_state:
     st.session_state.seed_papers = []
 if "graph" not in st.session_state:
     st.session_state.graph = False
+if "rec" not in st.session_state:
+    st.session_state.rec = False
+if "selected_set_md" not in st.session_state:
+    st.session_state.selected_set_md = ''
 
 selection = None
 with tab1:
@@ -113,48 +118,70 @@ if st.session_state.paper_results:
 
 if selection is not None:
     st.session_state.current_paper = selection
-
-if st.session_state.current_paper is not None and not st.session_state.graph:
     selection = st.session_state.current_paper
     papers = st.session_state.papers
     basis_paper = papers[int(selection)]
     recommendations = find_recommendations(basis_paper)
-    st.session_state.seed_papers.append({'seed': basis_paper, 'recommendations': recommendations})
-    for seed in st.session_state.seed_papers:
-        recommendation = seed['recommendations']
-        seed_paper = seed['seed']
-        with tab1:
-            with st.spinner("Generating Knowledge graph based on selection... ⏳"):
-                df = make_df(recommendation, seed_paper)
-            
-                graph, df = get_graph(df)
-                nodes = graph['nodes']
-                edges = graph['edges']
-                elements = nodes + edges
-                topics = df['topic'].unique().tolist()
-                topic_name = df['Topic'].unique().tolist()
-                topic_to_dict = {topic: df[df['Topic']==topic]['topic_color'].tolist()[0] for i, topic in enumerate(topic_name)}
-                topic_to_dict['Seed paper'] = df[df['is_seed']==True]['topic_color'].tolist()[0]
-                size_sort = sorted(topics, key=lambda x: len(df[df['topic']==x]), reverse=True)
+    df = make_df(recommendations, basis_paper)
+    #CHECK DATAFRAME EMPTY
+    if df.empty:
+        st.error('No recommendations found. Select another paper.')
+        st.stop()
+    else:
+        st.session_state.rec = True
+        st.session_state.df = df
+        st.session_state.seed_papers.append({'seed': basis_paper, 'recommendations': recommendations})
+        # for seed in st.session_state.seed_papers:
+        #     recommendation = seed['recommendations']
+        #     seed_paper = seed['seed']
+    
 
-                ids_by_topicsorted = []
-                for topic in size_sort:
-                    ids_by_topicsorted.extend(df[df['topic']==topic]['ID'].tolist())
-                id_of_seed = df[df['is_seed']==True]['ID'].tolist()[0]
-                ids_by_topicsorted.remove(id_of_seed)
-                color_topics = {topic: np.random.randint(0, 255, 3).tolist() for topic in topics}
-                layout = {"name": "grid", "animationDuration": 1}
-                layout["nodeRepulsion"] = 5000
-                layout["alignmentConstraint"] = [{"axis": "x", "offset": 0, "left": id_of_seed}]
-                layout["relativePlacementConstraint"] = [{"top": id_of_seed, "bottom": ids_by_topicsorted[0]}]
-                for i in range(len(ids_by_topicsorted)-1):
-                    layout["relativePlacementConstraint"] = [{"top": id_of_seed, "bottom": ids_by_topicsorted[i+1]}]
-                    layout["relativePlacementConstraint"].append({"top": ids_by_topicsorted[i], "bottom": ids_by_topicsorted[i+1]})
-        st.write('Graph generated! 🎉 --> Click on the "View graph" tab to see the graph.')
+if st.session_state.rec and not st.session_state.graph:
+    tab1.write('Graph generating ⏳ --> Click on the "View graph" tab to see the graph.')
+    
+    with st.spinner("Generating Knowledge graph based on selection... ⏳"):
+        df = st.session_state.df
+        graph, df = get_graph(df)
+        nodes = graph['nodes']
+        edges = graph['edges']
+        elements = nodes + edges
+        topics = df['topic'].unique().tolist()
+        topic_name = df['Topic'].unique().tolist()
+        topic_to_dict = {topic: df[df['Topic']==topic]['topic_color'].tolist()[0] for i, topic in enumerate(topic_name)}
+        try:
+            seed_color = df[df['is_seed']==True]['topic_color'].iloc[0]
+            topic_to_dict['Seed paper'] = seed_color
+            id_of_seed = df[df['is_seed']==True]['ID'].iloc[0]
+        except:
+            st.error(f'No seed paper found {df[df["is_seed"]==True]}')
+            id_of_seed = df['ID'].astype(int).iloc[0] 
+            topic_to_dict['Seed paper'] = '#e8da15'
+        size_sort = sorted(topics, key=lambda x: len(df[df['topic']==x]), reverse=True)
+
+        ids_by_topicsorted = []
+        for topic in size_sort:
+            ids_by_topicsorted.extend(df[df['topic']==topic]['ID'].astype(int).tolist())
+        
+        ids_by_topicsorted.remove(id_of_seed)
+
+        layout = {"name": "grid", "animationDuration": 1}
+        layout["nodeRepulsion"] = 5000
+        layout["alignmentConstraint"] = [{"axis": "x", "offset": 0, "left": int(id_of_seed)}]
+        layout["relativePlacementConstraint"] = [{"top": int(id_of_seed), "bottom": int(ids_by_topicsorted[0])}]
+        for i in range(len(ids_by_topicsorted)-1):
+            layout["relativePlacementConstraint"] = [{"top": int(id_of_seed), "bottom": int(ids_by_topicsorted[i+1])}]
+            layout["relativePlacementConstraint"].append({"top": int(ids_by_topicsorted[i]), "bottom": int(ids_by_topicsorted[i+1])})
+    
         st.session_state.graph = True
         st.session_state.graph_data = {'elements': elements, 'layout': layout, 'df': df, 'topic_to_dict': topic_to_dict}
+        # # save graph data to pickle
+        # import pickle
+        # with open('graph_data.pkl', 'wb') as f:
+        #     pickle.dump(st.session_state.graph_data, f, pickle.HIGHEST_PROTOCOL)
+        
 if st.session_state.graph:
     elements = st.session_state.graph_data['elements']
+
     layout = st.session_state.graph_data['layout']
     layout["name"] = 'grid'
     df = st.session_state.graph_data['df']
@@ -217,7 +244,7 @@ if st.session_state.graph:
                 key="graph",
             )
         with col2:
-            st.header('Topics')
+            st.subheader('Topics')
             legend = ''
             # print 'Seed paper' first
             legend += body.format(topic='Seed paper', topic_color="color: {};font-size:'20px'".format(topic_to_dict['Seed paper']))
@@ -227,13 +254,23 @@ if st.session_state.graph:
                 color = topic_to_dict[topic]
                 legend += body.format(topic=topic, topic_color="color: {};font-size:'20px'".format(color))
             st.markdown(legend, unsafe_allow_html=True)
+            if st.session_state.selected_set_md != '':
+                import markdown
+                selct_html = markdown.markdown(st.session_state.selected_set_md)
+                st.download_button(label="Download Selected Articles", data=selct_html, file_name='selected_articles.html', mime='text/html')
     with st.sidebar:
         # quey data frame with selected["nodes"] - print title with url and abstract
         try: 
             selected_ids =  selected['nodes']
             md = '### Selected articles: \n'
+            md_download = """# Selected articles: \n"""
+            topic_md_dict = {}
+            st.session_state.selected_set = set()
             for id in selected_ids:
                 selddf = df.query(f'ID == {int(id)}')
+                topic = selddf['Topic'].tolist()[0]
+                if topic not in topic_md_dict:
+                    topic_md_dict[topic] = ''
                 title = selddf['title'].tolist()[0]
                 url = selddf['url'].tolist()[0]
                 abstract = selddf['abstract'].tolist()[0]
@@ -241,9 +278,16 @@ if st.session_state.graph:
                 if year != '':
                     year = int(year) 
                 else: year = 'Unknown'
+                topic_md_dict[topic] += f'[*{id}*] [**{title}** ({year})]({url})\n' + f'> {abstract}\n' + '***\n'
+
                 md += f'[*{id}*] [**{title}** ({year})]({url})\n'
                 md += f'> {abstract}\n'
                 md += '***\n'
+                st.session_state.selected_set.add(int(id))
             st.markdown(md)
+            for topic in topic_md_dict:
+                md_download += f'## {topic}\n'
+                md_download += topic_md_dict[topic]
+            st.session_state.selected_set_md = md_download
         except:
             pass

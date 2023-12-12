@@ -93,6 +93,71 @@ def upload_pdf(paths, test=False, ref=True) -> ParsedWithSources:
  
     return ParsedWithSources(title_abstracts=title_abstracts, file_dict=filter_section_dict(file_dict, titles))
 
+def upload_pdf_meta(paths, test=False, ref=True):
+    file_dict = {}
+    # temp_dir = tempfile.TemporaryDirectory()
+    for path in paths:
+        if isinstance(path, str):
+            with open(path, 'rb') as f:
+                pdf_content = f.read()
+            filename = ntpath.basename(path)
+        else:
+            try:
+                pdf_content = path.read()
+                filename = path.name
+            except:
+                print("Error reading file stream: ", path)
+                continue
+            
+        # # compute hash
+        pdf_hash = hashlib.sha1(pdf_content).hexdigest()
+        # get Grobid -> TEI.XML
+        if test and ref:
+            meta = process_pdf_stream_meta(filename, pdf_hash, pdf_content, test=True, ref=True)
+        elif test:
+            meta = process_pdf_stream_meta(filename, pdf_hash, pdf_content, test=True)
+        elif ref:
+            meta = process_pdf_stream_meta(filename, pdf_hash, pdf_content, ref=True)
+        else:
+            meta = process_pdf_stream_meta(filename, pdf_hash, pdf_content)
+        if 'title' in meta:
+                meta['path'] = path
+                file_dict[meta['title']] = meta
+        else:
+            
+            file_dict[path] = meta
+    return file_dict
+
+def process_pdf_stream_meta(input_file: Union[str, List], sha: str, input_stream: bytes, grobid_config: Optional[Dict] = None, 
+                       ref=True, test=False) -> Dict:
+    """
+    Process PDF stream
+    :param input_file:
+    :param sha:
+    :param input_stream:
+    :return:
+    """
+
+    
+    # process PDF through Grobid -> TEI.XML
+    if ref:
+        grobid_config = "ref"
+    
+    if test:
+        client = GrobidClient(config=grobid_config, test=True)
+    else:
+        client = GrobidClient(config=grobid_config)
+    
+    tei_text = client.process_pdf_stream_meta(input_file, input_stream, 'temp', "processHeaderDocument")
+    content = "".join(tei_text)
+    try:
+        bs_content = BeautifulSoup(content, "lxml")
+        article = convert_article_soup_to_dict(bs_content)
+    except:
+        article = content
+        print("Error converting to soup: ", input_file)
+    return article
+
 def process_pdf_stream(input_file: Union[str, List], sha: str, input_stream: bytes, grobid_config: Optional[Dict] = None, 
                        ref=True, test=False) -> Dict:
     """

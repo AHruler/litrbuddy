@@ -25,30 +25,32 @@ prompt = lambda TITLES, KEYWORDS: f"""
 I have topic that contains documents with the following titles: {TITLES}.
 The topic is described by the following keywords: {KEYWORDS}.
 Based on the above information, can you give a short label of the topic? Use the following format ONLY: "Label: <label>".
-"""
+"""     
 class ResearchCorpus():
-    # corpus_embeddings: np.ndarray = Field(default_factory=lambda: np.zeros(10))
-    # corpus_embeddings_norm: np.ndarray = Field(default_factory=lambda: np.zeros(10))
-    # clustering_model: AgglomerativeClustering = Field(default_factory=lambda: AgglomerativeClustering(n_clusters=None, distance_threshold=1.5))
-    # cluster_assignment: np.ndarray = Field(default_factory=lambda: np.zeros(10))
-    # clustered_sentences: Dict = Field(default_factory=lambda: {})
-    # size_cluster: List = Field(default_factory=lambda: [])
-    # labels: List = Field(default_factory=lambda: [])
-    # titles: List = Field(default_factory=lambda: [])
-    # label_topics: Dict = Field(default_factory=lambda: {})
-    # prompt: str = Field(default_factory=lambda: prompt)
-    # nodes: Dict
-    # class Config:
-    #     arbitrary_types_allowed = True
-
-
+    """
+    Class to hold a corpus of research papers
+    
+    Attributes:
+        file_dict (dict): A dictionary containing information about the research papers.
+        is_seed (list): A list indicating whether each paper is a seed or not.
+        corpus_embeddings (numpy.ndarray): An array of embeddings for the title and abstract of each paper.
+        corpus_embeddings_norm (numpy.ndarray): An array of normalized embeddings for the title and abstract of each paper.
+        clustering_model (AgglomerativeClustering): A clustering model used to cluster the papers based on their embeddings.
+        cluster_assignment (numpy.ndarray): An array indicating the cluster assignment for each paper.
+        clustered_sentences (dict): A dictionary containing the papers grouped by cluster.
+        size_cluster (list): A list containing the number of papers in each cluster.
+        labels (dict_keys): The unique labels of the clusters.
+        titles (list): A list of the titles of the papers in each cluster.
+        label_topics (dict): A dictionary containing the topics generated for each cluster.
+        prompt (str): The prompt used for generating topics.
+    """
     def __init__(self, title_abstracts, is_seed, file_dict):
         self.file_dict = file_dict
         self.is_seed = is_seed
         
         model = SentenceTransformer('allenai-specter')
         self.corpus_embeddings = model.encode(title_abstracts, convert_to_numpy=True)
-        self.corpus_embeddings_norm = self.corpus_embeddings /  np.linalg.norm(self.corpus_embeddings, axis=1, keepdims=True)
+        self.corpus_embeddings_norm = self.corpus_embeddings / np.linalg.norm(self.corpus_embeddings, axis=1, keepdims=True)
         self.clustering_model = AgglomerativeClustering(n_clusters=None, distance_threshold=0.6) #, affinity='cosine', linkage='average', distance_threshold=0.4)
         self.clustering_model.fit(self.corpus_embeddings_norm)
         self.cluster_assignment = self.clustering_model.labels_
@@ -75,6 +77,9 @@ class ResearchCorpus():
         self._get_topics()
 
     def _get_topics(self):
+        """
+        Generate keywords and topics for each cluster.
+        """
         label_keywords = {}
         kw_model = KeyBERT()
         pbar3 = tqdm(total=len(self.labels), desc='Get Keywords for {} clusters'.format(len(self.labels)))
@@ -100,6 +105,15 @@ class ResearchCorpus():
         
     @staticmethod         
     def _llma_chat(prompt):
+        """
+        Perform a chat completion using the Llama-2-70b model.
+        
+        Args:
+            prompt (str): The prompt for the chat completion.
+            
+        Returns:
+            str: The response from the chat completion.
+        """
         s = requests.Session()
 
         api_base = st.session_state['OPENAI_API_BASE']
@@ -132,6 +146,16 @@ class ResearchCorpus():
         df['Topic'] = df['cluster_id'].apply(lambda x: self.label_topics[x].strip().split('Label: ')[-1])
         return df
     def make_graphs(self, df, t=0):
+        """
+        Create graphs based on the dataframe of papers.
+        
+        Args:
+            df (pandas.DataFrame): The dataframe containing the paper information.
+            t (int, optional): The threshold for centrality scores. Defaults to 0.
+            
+        Returns:
+            dict, pandas.DataFrame: The graphs and a copy of the dataframe with additional information.
+        """
         clusters = df['Topic'].tolist()
         articles = df['title_abstract'].tolist()
         IDs = df['ID'].tolist()
@@ -144,6 +168,20 @@ class ResearchCorpus():
 
     @staticmethod
     def _get_centrality_graph(articles, IDs, titles, topics, is_seed, t=0):
+        """
+        Compute centrality scores and create a graph based on the scores.
+        
+        Args:
+            articles (list): A list of the title and abstract of each paper.
+            IDs (list): A list of IDs for each paper.
+            titles (list): A list of the titles of the papers.
+            topics (list): A list of the topics for each paper.
+            is_seed (list): A list indicating whether each paper is a seed or not.
+            t (int, optional): The threshold for centrality scores. Defaults to 0.
+            
+        Returns:
+            list, list, dict: The edges, nodes, and color dictionary for the graph.
+        """
         #Compute the sentence embeddings
         cos_scores = get_sim_matrix(articles, model_name='allenai-specter')
         centrality_scores = degree_centrality_scores(cos_scores, threshold=None)
@@ -190,7 +228,8 @@ class ResearchCorpus():
          
 # helper function to get the top n most similar articles
 def map_to_color(topicslist, topic, is_seed):
-    color_options = ['#eb3dd6', '#32f1e7', '#3bf035', '#36c9b3', 'b7edca', '#f5b17d']
+    color_options = ['#eb3dd6', '#32f1e7', '#FF7F50', '#90bbd4', '#b7edca', '#f5917d',
+                     '#8FBC8F', '#778899', '#FF69B4', '#FF6347']
     seed_color = '#e8da15'
     if is_seed:
         return seed_color
