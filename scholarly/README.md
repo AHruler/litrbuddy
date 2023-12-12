@@ -1,12 +1,14 @@
 # Scholarly - Streamlit Demo App
-**Note:** app's a work in progress
+**Note:** The app's a work in progress
 ## Overview
 A tool that helps  explore research papers. It uses:
 * [Semantic Scholar API](https://www.semanticscholar.org/product/api) to search for papers
 * Clustering to group similar papers (see ResearchCorpus.py)
 * Keyword extraction + Llama to generate topic names 
-* cytoscape.js for easy visualization and selection of intresting papers 
+* cytoscape.js for easy visualization and selection of interesting papers 
 * [Streamlit](https://www.streamlit.io/) for the UI
+
+  [Click here to test on streamlit](https://scholarly.streamlit.app/)
 
 ## Current Features
 - **Article Search:** Utilize the Semantic Scholar API to search for scholarly articles.
